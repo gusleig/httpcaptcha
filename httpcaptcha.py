@@ -1,21 +1,19 @@
 import time
 import pytesseract
-import BeautifulSoup
-import re
 import os
+import urllib
+
+try:
+    from urllib.parse import urlparse
+except ImportError:
+     from urlparse import urlparse
 
 
-from urlparse import urlparse
 
 import glob
 
 import sys
 import html2text
-
-from urllib import urlretrieve
-from urllib2 import urlopen
-
-import urlparse
 
 from captcha_solver import CaptchaSolver
 from selenium import webdriver
@@ -33,6 +31,15 @@ except ImportError:
 
 from subprocess import check_output
 
+
+def send_message(text, chat_id, reply_markup=None):
+    text = urllib.parse.quote_plus(text)
+    # text = urllib.urlencode(text)
+    url = URL + "sendMessage?text={}&chat_id={}&parse_mode=Markdown".format(text, chat_id)
+    if reply_markup:
+        url += "&reply_markup={}".format(reply_markup)
+    get_url(url)
+
 def get_latest_file(path):
     list_of_files = glob.glob('{}\*.png'.format(path))  # * means all if need specific format then *.csv
     latest_file = max(list_of_files, key=os.path.getctime)
@@ -48,51 +55,9 @@ def resolve(path):
     check_output(['convert', path, '-resample', '600', path])
     return pytesseract.image_to_string(Image.open(path))
 
-def make_soup(url):
-    html = urlopen(url).read()
-    return BeautifulSoup.BeautifulSoup(html)
-
-def get_images(soup):
-
-    #this makes a list of bs4 element tags
-
-    images = [img for img in soup.findAll('img')]
-    print (str(len(images)) + "images found.")
-    print 'Downloading images to current working directory.'
-    image_links = [each.get('src') for each in images]
-    img = soup.findAll(['img'])
-    for i in img:
-        try:
-            # built the complete URL using the domain and relative url you scraped
-            url2 = get_domain(url) + i.get('src')
-            # get the file name
-            name = "result_" + url2.split('/')[-1]
-            name = re.sub('[!@#$=?]', '', name)
-            name = "captcha.png"
-
-            # detect if that is a type of pictures you want
-            #type = name.split('.')[-1]
-            #write picture to disk
-            urlretrieve(url2,name)
-            #if type in ['jpg', 'png', 'gif']:
-                # if so, retrieve the pictures
-                #urlretrieve(i.get('src'), name)
-        except:
-            pass
-
-    return image_links
 
 
-def create_image(url):
-    #br = mechanize.Browser()
-    #response = br.open(url)
-    #Soup = BeautifulSoup.BeautifulSoup(response.get_data())
-    #Solver = CaptchaSolver('browser')
-    get_images(url)
-    #image_response = br.open_novisit(img['src'])
-    #image = image_response.read()
 
-    return image
 
 
 def get_session_id(raw_resp):
@@ -211,7 +176,7 @@ class UrlChange2:
         new_content = self.get_content()
         s = difflib.SequenceMatcher(None, self.content, new_content)
         for tag, i1, i2, j1, j2 in s.get_opcodes():
-            if tag == "insert" or tag == "replaced":
+            if tag == "insert" or tag == "replaced" or tag == "replace":
                 result += new_content[j1:j2]
         return result
 
@@ -227,7 +192,7 @@ class UrlChange2:
             date = datetime.datetime.now().strftime("%d.%m.%Y %H:%M:%S")
             diff = self.diff()
 
-            logger.info("{diff}".format(**locals()))
+            # logger.info("{diff}".format(**locals()))
 
             diff.encode("ascii", "ignore")
 
@@ -235,20 +200,18 @@ class UrlChange2:
             self.url_hash = self.create_hash()
             self.content = self.get_content()
 
+            send_message("Something has changed", diff, "" )
+
             print("Url difference!",
                         ("The Url  has changed at {date} ."
                         "\n\nNew content\n{diff}").format(date=date, diff=diff))
         return True
 
 
-root = logging.getLogger()
-root.setLevel(logging.DEBUG)
+TOKEN = "396191661:AAEif0oYT4mgyxPnuztxTaw1DEGyrU4KpSE"
 
-ch = logging.StreamHandler(sys.stdout)
-ch.setLevel(logging.INFO)
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-ch.setFormatter(formatter)
-root.addHandler(ch)
+URL = "https://api.telegram.org/bot{}/".format(TOKEN)
+
 
 # A new logging object is created
 
@@ -260,7 +223,8 @@ logger.setLevel(logging.INFO)
 
 url = "http://comprasnet.gov.br/livre/Pregao/Mensagens_Sessao_Publica.asp?prgCod=687204";
 
-# url = "https://twitter.com/gusleig"
+url = "https://twitter.com/gusleig"
+
 # latest_print= get_latest_file(os.path.dirname(os.path.realpath(__file__)))
 #soup = make_soup(url)
 #get_images(soup)
