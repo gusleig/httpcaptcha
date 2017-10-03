@@ -2,19 +2,21 @@ import time
 import pytesseract
 import BeautifulSoup
 import re
-import requests
-from mechanize import Browser
-from urllib2 import urlopen
-from urlparse import urlparse
-import mechanize
+import os
 
-from selenium import webdriver
+
+from urlparse import urlparse
+
+import glob
 
 import sys
-import argparse
+import html2text
+
 from urllib import urlretrieve
+from urllib2 import urlopen
+
 import urlparse
-from subprocess import check_output
+
 from captcha_solver import CaptchaSolver
 from selenium import webdriver
 
@@ -30,6 +32,11 @@ except ImportError:
     from PIL import Image
 
 from subprocess import check_output
+
+def get_latest_file(path):
+    list_of_files = glob.glob('{}\*.png'.format(path))  # * means all if need specific format then *.csv
+    latest_file = max(list_of_files, key=os.path.getctime)
+    return latest_file
 
 def get_domain(url):
     parsed_uri = urlparse.urlparse(url)
@@ -76,7 +83,6 @@ def get_images(soup):
     return image_links
 
 
-
 def create_image(url):
     #br = mechanize.Browser()
     #response = br.open(url)
@@ -88,6 +94,7 @@ def create_image(url):
 
     return image
 
+
 def get_session_id(raw_resp):
     soup = bs(raw_resp.text, 'lxml')
     token = soup.find_all('input', {'name':'survey_session_id'})[0]['value']
@@ -97,11 +104,13 @@ def get_session_id(raw_resp):
 def take_screenshot(name):
     driver.save_screenshot(name)
 
+
 def crop_image(location, size):
     image = Image.open('captcha.png')
     x, y = location['x'], location['y']
     w, h = size['width'], size['height']
     image.crop((x, y, x + w, y + h)).save('captcha.png')
+
 
 def recover_text(filename):
     image = Image.open('captcha.png')
@@ -109,25 +118,77 @@ def recover_text(filename):
     image = Image.merge('RGB', (r, g, b))
     return pytesseract.image_to_string(image)
 
-class UrlChange:
-    """ URL is checked and a hash is made. Changes are regcognized and
-    reported
-    """
 
-    def __init__(self, url):
-        self.url = url
+def has_captcha(web):
+    exist = False
+    try:
+        element = web.find_element_by_xpath("//img[@src='/scripts/srf/intercepta/captcha.aspx?opt=image']");
+        exist = True
+    except Exception as e:
+        return exist
+    return exist
 
+
+def bypass_captcha(web):
+    # bypass captcha
+    logger.info("Bypassing captcha")
+    x = 0
+    while True:
+        try:
+            image_element = web.find_element_by_xpath("//img[@src='/scripts/srf/intercepta/captcha.aspx?opt=image']");
+        except Exception:
+            logger.info("Web server error: captcha not located")
+            return False
+
+        location = image_element.location
+        size = image_element.size
+
+        take_screenshot("captcha.png")
+        crop_image(location, size)
+
+        solver = CaptchaSolver('antigate', api_key='db950dc1814b2f2107523d1ca043dea1')
+        raw_data = open('captcha.png', 'rb').read()
+
+        text = solver.solve_captcha(raw_data)
+        try:
+            txtbox1 = web.find_element_by_id('idLetra')
+            txtbox1.send_keys(text)
+        except Exception:
+            logger.info("Web server error")
+            return False
+
+        time.sleep(2)
+        # submit
+        web.find_element_by_name('Submit').click()
+
+        time.sleep(5)
+
+        try:
+            # if captcha still there, need to try again
+            image_element = web.find_element_by_xpath("//img[@src='/scripts/srf/intercepta/captcha.aspx?opt=image']")
+
+            logger.info("captcha error")
+            x += 1
+            if x > 3:
+                return False
+        except Exception:
+            return True
+
+
+class UrlChange2:
+
+    def __init__(self, web):
+
+        self.web = web
+        if has_captcha(web):
+            bypass_captcha(web)
         self.url_hash = self.create_hash()
         self.content = self.get_content()
-        logger.info(("Start Monitoring... hash "
-                    "{url_hash}").format(url_hash=self.url_hash))
 
     def get_content(self):
-        """ The data is read from the url. """
         try:
-            url_data = urllib.request.urlopen(self.url)
-            url_data = url_data.read()
-            url_data = url_data.decode("utf-8", "ignore")
+            url_data = self.web.page_source
+            # url_data = url_data.decode("utf-8", "ignore")
             url_data = html2text.html2text(url_data)
         except Exception as e:
             logger.critical("Error: {}".format(e))
@@ -135,37 +196,13 @@ class UrlChange:
         return url_data
 
     def create_hash(self):
-        """ A md5 hash is created from the url_data. """
-        url_data = self.get_content().encode("utf-8")
+
+        if has_captcha(self.web):
+            bypass_captcha(self.web)
+        url_data = self.web.page_source.encode("utf-8")
         md5_hash = hashlib.md5()
         md5_hash.update(url_data)
         return md5_hash.hexdigest()
-
-    def compare_hash(self):
-        """ The hash is compared with the stored value. If there is a change
-        a function is opend witch alerts the user.
-        """
-        if(self.create_hash() == self.url_hash):
-            logger.info("Nothing has changed")
-            return False
-        else:
-            logger.info("Something has changed")
-            date = datetime.datetime.now().strftime("%d.%m.%Y %H:%M:%S")
-            if(not args.nomail):
-                send_mail("Url has changed!",
-                        ("The Url {url} has changed at "
-                        "{date} .").format(url=self.url, date=date))
-            if(not args.nodiff):
-                diff = self.diff()
-                logger.info("{diff}".format(**locals()))
-                if(not args.nomail):
-                    diff.encode("ascii", "ignore")
-                    send_mail("Url difference!",
-                            ("The Url {url} has changed at {date} ."
-                            "\n\nNew content\n{diff}").format(url=self.url,
-                                                                date=date,
-                                                                diff=diff))
-            return True
 
     def diff(self):
         """ The function tries to extract the changed part of the url content.
@@ -174,26 +211,44 @@ class UrlChange:
         new_content = self.get_content()
         s = difflib.SequenceMatcher(None, self.content, new_content)
         for tag, i1, i2, j1, j2 in s.get_opcodes():
-            if(tag == "insert" or tag == "replaced"):
+            if tag == "insert" or tag == "replaced":
                 result += new_content[j1:j2]
         return result
 
+    def compare_hash(self):
+        """ The hash is compared with the stored value. If there is a change
+        a function is opend witch alerts the user.
+        """
+        if self.create_hash() == self.url_hash:
+            logger.info("Nothing has changed")
+            return False
+        else:
+            logger.info("Something has changed")
+            date = datetime.datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+            diff = self.diff()
+
+            logger.info("{diff}".format(**locals()))
+
+            diff.encode("ascii", "ignore")
+
+            # reset
+            self.url_hash = self.create_hash()
+            self.content = self.get_content()
+
+            print("Url difference!",
+                        ("The Url  has changed at {date} ."
+                        "\n\nNew content\n{diff}").format(date=date, diff=diff))
+        return True
 
 
-# Arguments from the console are parsed
-#parser = argparse.ArgumentParser(
-                                description=("Monitor ifa website"
-                                            "has changed.")
-                                )
-#parser.add_argument("url", help="url that should be monitored")
-#parser.add_argument("-t", "--time",
-                    help="seconds between checks (default: 600)",
-                    default=600, type=int)
-#parser.add_argument("-nd", "--nodiff", help="show no difference",
-                    action="store_true")
-#parser.add_argument("-n", "--nomail", help="no email is sent",
-                    action="store_true")
-#args = parser.parse_args()
+root = logging.getLogger()
+root.setLevel(logging.DEBUG)
+
+ch = logging.StreamHandler(sys.stdout)
+ch.setLevel(logging.INFO)
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+ch.setFormatter(formatter)
+root.addHandler(ch)
 
 # A new logging object is created
 
@@ -205,17 +260,16 @@ logger.setLevel(logging.INFO)
 
 url = "http://comprasnet.gov.br/livre/Pregao/Mensagens_Sessao_Publica.asp?prgCod=687204";
 
+# url = "https://twitter.com/gusleig"
+# latest_print= get_latest_file(os.path.dirname(os.path.realpath(__file__)))
 #soup = make_soup(url)
-
 #get_images(soup)
-
 #print('Resolving Captcha')
-
 #solver = CaptchaSolver('antigate', api_key='db950dc1814b2f2107523d1ca043dea1')
-
 #raw_data = open('captcha.png', 'rb').read()
-
 #print(solver.solve_captcha(raw_data))
+
+logger.info("Program init")
 
 webpage = url # edit me
 
@@ -225,42 +279,15 @@ time.sleep(2)
 
 driver.get(webpage)
 
-#sbox = driver.find_element_by_class_name("txtSearch")
-image_element = driver.find_element_by_xpath("//img[@src='/scripts/srf/intercepta/captcha.aspx?opt=image']");
+# store 1st web page
+url1 = UrlChange2(driver)
 
+# take_screenshot("screen{}.jpg".format("%d.%m.%Y.%H"))
 
-location = image_element.location
-size = image_element.size
+time.sleep(6)
 
-take_screenshot("captcha.png")
-
-
-crop_image(location, size)
-
-#text = recover_text('captcha.png').strip()
-
-solver = CaptchaSolver('antigate', api_key='db950dc1814b2f2107523d1ca043dea1')
-
-raw_data = open('captcha.png', 'rb').read()
-
-text = solver.solve_captcha(raw_data)
-
-print text
-
-txtbox1 = driver.find_element_by_id('idLetra')
-txtbox1.send_keys(text)
-time.sleep(5)
-
-
-#submit
-driver.find_element_by_name('Submit').click()
-
-take_screenshot("img{}.jpg".format(%d.%m.%Y))
-
-url1 = UrlChange(args.url)
-
-time.sleep(360)
-while(True):
-    if(url1.compare_hash()):
-        break
-    time.sleep(360)
+while True:
+    logger.info("Refreshing page")
+    driver.get(webpage)
+    url1.compare_hash()
+    time.sleep(600)
