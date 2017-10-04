@@ -2,13 +2,14 @@ import time
 import pytesseract
 import os
 import urllib
+import requests
+
+from dbhelper import DBHelper
 
 try:
     from urllib.parse import urlparse
 except ImportError:
-     from urlparse import urlparse
-
-
+    from urlparse import urlparse
 
 import glob
 
@@ -38,26 +39,25 @@ def send_message(text, chat_id, reply_markup=None):
     url = URL + "sendMessage?text={}&chat_id={}&parse_mode=Markdown".format(text, chat_id)
     if reply_markup:
         url += "&reply_markup={}".format(reply_markup)
-    get_url(url)
+    requests.get_url(url)
+
 
 def get_latest_file(path):
     list_of_files = glob.glob('{}\*.png'.format(path))  # * means all if need specific format then *.csv
     latest_file = max(list_of_files, key=os.path.getctime)
     return latest_file
 
+
 def get_domain(url):
-    parsed_uri = urlparse.urlparse(url)
+    parsed_uri = urlparse(url)
     domain = '{uri.scheme}://{uri.netloc}/'.format(uri=parsed_uri)
     return domain
+
 
 def resolve(path):
     print("Resampling the Image")
     check_output(['convert', path, '-resample', '600', path])
     return pytesseract.image_to_string(Image.open(path))
-
-
-
-
 
 
 def get_session_id(raw_resp):
@@ -180,15 +180,16 @@ class UrlChange2:
                 result += new_content[j1:j2]
         return result
 
-    def compare_hash(self):
+    def compare_hash(self, bot, db):
         """ The hash is compared with the stored value. If there is a change
         a function is opend witch alerts the user.
         """
         if self.create_hash() == self.url_hash:
-            logger.info("Nothing has changed")
+            # logger.info("Nothing has changed")
             return False
         else:
-            logger.info("Something has changed")
+
+            # logger.info("Something has changed")
             date = datetime.datetime.now().strftime("%d.%m.%Y %H:%M:%S")
             diff = self.diff()
 
@@ -200,7 +201,11 @@ class UrlChange2:
             self.url_hash = self.create_hash()
             self.content = self.get_content()
 
-            send_message("Something has changed", diff, "" )
+            items = db.get_all()
+
+            if len(items) > 0:
+                for chat_id in items:
+                    bot.send_message(chat_id, "Something has changed")
 
             print("Url difference!",
                         ("The Url  has changed at {date} ."
@@ -208,50 +213,125 @@ class UrlChange2:
         return True
 
 
-TOKEN = "396191661:AAEif0oYT4mgyxPnuztxTaw1DEGyrU4KpSE"
-
-URL = "https://api.telegram.org/bot{}/".format(TOKEN)
-
-
-# A new logging object is created
-
-logging.basicConfig(format="%(asctime)s %(message)s",
-                    datefmt="%d.%m.%Y %H:%M:%S")
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+class BotHandler:
+    def __init__(self, token):
+        self.token = token
+        self.api_url = "https://api.telegram.org/bot{}/".format(token)
+        self.db = DBHelper()
 
 
-url = "http://comprasnet.gov.br/livre/Pregao/Mensagens_Sessao_Publica.asp?prgCod=687204";
+    def get_updates(self, offset=None, timeout=30):
+        method = 'getUpdates'
+        params = {'timeout': timeout, 'offset': offset}
+        resp = requests.get(self.api_url + method, params)
+        result_json = resp.json()['result']
+        return result_json
 
-url = "https://twitter.com/gusleig"
+    def send_message(self, chat_id, text):
+        params = {'chat_id': chat_id, 'text': text}
+        method = 'sendMessage'
+        resp = requests.post(self.api_url + method, params)
+        return resp
 
-# latest_print= get_latest_file(os.path.dirname(os.path.realpath(__file__)))
-#soup = make_soup(url)
-#get_images(soup)
-#print('Resolving Captcha')
-#solver = CaptchaSolver('antigate', api_key='db950dc1814b2f2107523d1ca043dea1')
-#raw_data = open('captcha.png', 'rb').read()
-#print(solver.solve_captcha(raw_data))
+    def get_last_update(self):
+        get_result = self.get_updates()
 
-logger.info("Program init")
+        if len(get_result) > 0:
+            last_update = get_result[-1]
+        else:
+            last_update = get_result[len(get_result)]
 
-webpage = url # edit me
+        return last_update
 
-driver = webdriver.Firefox()
+    def handle_updates(self, updates):
+        for update in updates:
+            try:
 
-time.sleep(2)
+                chat = update["message"]["chat"]["id"]
+                name = update["message"]["from"]["last_name"]
 
-driver.get(webpage)
+                items = self.db.get_items(chat)
+                if len(items)>0:
+                    if str(chat) not in items:
 
-# store 1st web page
-url1 = UrlChange2(driver)
+                        self.db.add_item(name, chat)
+                        # items = db.get_items()
+                        message = "\n".join(items)
+                        # send_message(chat, message)
+                else:
+                    self.db.add_item(name, chat)
 
-# take_screenshot("screen{}.jpg".format("%d.%m.%Y.%H"))
+            except KeyError:
+                    pass
 
-time.sleep(6)
 
-while True:
-    logger.info("Refreshing page")
+    def get_last_update_id(self, updates):
+        update_ids = []
+        for update in updates:
+            update_ids.append(int(update["update_id"]))
+        return max(update_ids)
+
+
+__all__ = []
+
+
+def main():
+
+    db = DBHelper()
+
+    TOKEN = "396191661:AAEif0oYT4mgyxPnuztxTaw1DEGyrU4KpSE"
+
+    URL = "https://api.telegram.org/bot{}/".format(TOKEN)
+
+    # A new logging object is created
+
+    logging.basicConfig(format="%(asctime)s %(message)s",
+                        datefmt="%d.%m.%Y %H:%M:%S")
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+
+    url = "http://comprasnet.gov.br/livre/Pregao/Mensagens_Sessao_Publica.asp?prgCod=687204";
+
+    url = "https://twitter.com/gusleig"
+
+
+    logger.info("Program init")
+
+    webpage = url # edit me
+
+    driver = webdriver.Firefox()
+
+    time.sleep(2)
+
     driver.get(webpage)
-    url1.compare_hash()
-    time.sleep(600)
+
+    # store 1st web page
+    url1 = UrlChange2(driver)
+
+    # take_screenshot("screen{}.jpg".format("%d.%m.%Y.%H"))
+
+    time.sleep(6)
+
+    db.setup()
+    last_update_id = None
+    bot = BotHandler("396191661:AAEif0oYT4mgyxPnuztxTaw1DEGyrU4KpSE")
+
+    while True:
+
+        logger.info("Refreshing page")
+
+        updates = bot.get_updates(last_update_id)
+
+        if len(updates) > 0:
+            last_update_id = bot.get_last_update_id(updates) + 1
+            bot.handle_updates(updates)
+
+        time.sleep(0.5)
+
+        driver.get(webpage)
+        url1.compare_hash(bot, db)
+        time.sleep(600)
+
+
+if __name__ == '__main__':
+    main()
