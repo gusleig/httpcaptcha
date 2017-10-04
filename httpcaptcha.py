@@ -219,7 +219,6 @@ class BotHandler:
         self.api_url = "https://api.telegram.org/bot{}/".format(token)
         self.db = DBHelper()
 
-
     def get_updates(self, offset=None, timeout=30):
         method = 'getUpdates'
         params = {'timeout': timeout, 'offset': offset}
@@ -279,9 +278,9 @@ def main():
 
     db = DBHelper()
 
-    TOKEN = "396191661:AAEif0oYT4mgyxPnuztxTaw1DEGyrU4KpSE"
+    token = "396191661:AAEif0oYT4mgyxPnuztxTaw1DEGyrU4KpSE"
 
-    URL = "https://api.telegram.org/bot{}/".format(TOKEN)
+    URL = "https://api.telegram.org/bot{}/".format(token)
 
     # A new logging object is created
 
@@ -293,7 +292,6 @@ def main():
     url = "http://comprasnet.gov.br/livre/Pregao/Mensagens_Sessao_Publica.asp?prgCod=687204";
 
     url = "https://twitter.com/gusleig"
-
 
     logger.info("Program init")
 
