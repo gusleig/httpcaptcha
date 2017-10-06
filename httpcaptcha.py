@@ -39,6 +39,7 @@ class ReadConfig:
     def __init__(self):
         self.setup = self.setup_config()
         self.apikey = self.get_api()
+        self.botid = self.get_bot()
 
     def setup_config(self):
 
@@ -63,6 +64,14 @@ class ReadConfig:
             logger.info("Creating apikey option")
             Config.set("config", "apikey", "")
         return self.apikey
+
+    def get_bot(self):
+        try:
+            self.botid = Config.get("config", "botid")
+        except:
+            logger.info("Creating botid option")
+            Config.set("config", "botid", "")
+        return self.botid
 
 
 def get_latest_file(path):
@@ -288,7 +297,7 @@ DB_FILE = 'data/bot.shelve.db'
 
 DEFAULT_REPLY_MARKUP = {'keyboard': [['Check', 'Help']], 'resize_keyboard': True}
 
-token = "396191661:AAEif0oYT4mgyxPnuztxTaw1DEGyrU4KpSE"
+
 
 # A new logging object is created
 
@@ -303,6 +312,11 @@ driver = webdriver.Firefox()
 Config = configparser.ConfigParser()
 
 settings = ReadConfig()
+bot = Bot(settings.botid)
+
+if settings.botid == "":
+    logger.info("Missing botid in config.ini")
+    exit()
 
 if settings.apikey == "":
     logger.info("Missing apikey in config.ini")
@@ -311,16 +325,13 @@ if settings.apikey == "":
 
 def main():
 
-    # db = DBHelper()
-    bot = Bot("396191661:AAEif0oYT4mgyxPnuztxTaw1DEGyrU4KpSE")
-
     url = "http://comprasnet.gov.br/livre/Pregao/Mensagens_Sessao_Publica.asp?prgCod=687204";
 
     # url = "https://twitter.com/gusleig"
 
     logger.info("Program init")
 
-    webpage = url # edit me
+    webpage = url  # edit me
 
     time.sleep(2)
 
