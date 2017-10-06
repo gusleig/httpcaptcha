@@ -4,8 +4,9 @@ import urllib
 import requests
 import telepot
 import shelve
+import configparser
 
-from dbhelper import DBHelper
+
 
 try:
     from urllib.parse import urlparse
@@ -34,13 +35,34 @@ except ImportError:
 from subprocess import check_output
 
 
-def send_message(text, chat_id, reply_markup=None):
-    text = urllib.parse.quote_plus(text)
-    # text = urllib.urlencode(text)
-    url = URL + "sendMessage?text={}&chat_id={}&parse_mode=Markdown".format(text, chat_id)
-    if reply_markup:
-        url += "&reply_markup={}".format(reply_markup)
-    requests.get_url(url)
+class ReadConfig:
+    def __init__(self):
+        self.setup = self.setup_config()
+        self.apikey = self.get_api()
+
+    def setup_config(self):
+
+        Config.read("config.ini")
+        try:
+            cfgfile = open("config.ini", 'r')
+        except:
+            logger.info("Creating config file")
+            cfgfile = open("config.ini", 'w')
+            Config.add_section('config')
+            Config.set('config', 'apikey', "")
+            Config.write(cfgfile)
+            cfgfile.close()
+            Config.read("config.ini")
+        return True
+
+    def get_api(self):
+
+        try:
+            self.apikey = Config.get("config", "apikey")
+        except:
+            logger.info("Creating apikey option")
+            Config.set("config", "apikey", "")
+        return self.apikey
 
 
 def get_latest_file(path):
@@ -99,6 +121,9 @@ def bypass_captcha(web):
     # bypass captcha
     logger.info("Bypassing captcha")
     x = 0
+
+    apikey = settings.apikey
+
     while True:
         try:
             image_element = web.find_element_by_xpath("//img[@src='/scripts/srf/intercepta/captcha.aspx?opt=image']");
@@ -112,7 +137,7 @@ def bypass_captcha(web):
         take_screenshot("captcha.png")
         crop_image(location, size)
 
-        solver = CaptchaSolver('antigate', api_key='db950dc1814b2f2107523d1ca043dea1')
+        solver = CaptchaSolver('antigate', api_key=apikey)
 
         raw_data = open('captcha.png', 'rb').read()
 
@@ -258,6 +283,7 @@ class Bot:
 
 __all__ = []
 
+
 DB_FILE = 'data/bot.shelve.db'
 
 DEFAULT_REPLY_MARKUP = {'keyboard': [['Check', 'Help']], 'resize_keyboard': True}
@@ -272,6 +298,15 @@ logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 driver = webdriver.Firefox()
+
+# Read config.ini
+Config = configparser.ConfigParser()
+
+settings = ReadConfig()
+
+if settings.apikey == "":
+    logger.info("Missing apikey in config.ini")
+    exit()
 
 
 def main():
