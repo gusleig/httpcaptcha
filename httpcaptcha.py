@@ -5,8 +5,7 @@ import requests
 import telepot
 import shelve
 import configparser
-
-
+from captcha2upload import CaptchaUpload
 
 try:
     from urllib.parse import urlparse
@@ -94,7 +93,7 @@ def resolve(path):
 
 def get_session_id(raw_resp):
     soup = bs(raw_resp.text, 'lxml')
-    token = soup.find_all('input', {'name':'survey_session_id'})[0]['value']
+    token = soup.find_all('input', {'name': 'survey_session_id'})[0]['value']
     return token
 
 
@@ -146,11 +145,14 @@ def bypass_captcha(web):
         take_screenshot("captcha.png")
         crop_image(location, size)
 
-        solver = CaptchaSolver('antigate', api_key=apikey)
+        #solver = CaptchaSolver('antigate', api_key=apikey)
 
-        raw_data = open('captcha.png', 'rb').read()
+        # raw_data = open('captcha.png', 'rb').read()
+        # text = solver.solve_captcha(raw_data)
 
-        text = solver.solve_captcha(raw_data)
+        captcha = CaptchaUpload(apikey)
+        text = captcha.solve('captcha.png')
+
         try:
             txtbox1 = web.find_element_by_id('idLetra')
             txtbox1.send_keys(text)
